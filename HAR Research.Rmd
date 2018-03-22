@@ -1,0 +1,132 @@
+---
+title: "HAR Research"
+author: "Vipul Sharma"
+date: "3/22/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction  
+Human Activity Recognition - HAR - has emerged as a key research area in the last years and is gaining increasing attention by the pervasive computing research community (see picture below, that illustrates the increasing number of publications in HAR with wearable accelerometers), especially for the development of context-aware systems. There are many potential applications for HAR, like: elderly monitoring, life log systems for monitoring energy expenditure and for supporting weight-loss programs, and digital assistants for weight lifting exercises.
+
+In this project, we will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+## Setup and Data preparation
+
+TRAINING : https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+TEST : https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+### Setup 
+```{r, cache = T, warning = FALSE}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+```
+
+### Download
+Setting working directory to the location you want to download the file into. If it is already downloaded then moving on to next step.
+```{r, cache = T}
+train_url <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test_url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+train_file <- "./data/pml-training.csv"
+test_file  <- "./data/pml-testing.csv"
+
+if (!file.exists("./data")) {
+  dir.create("./data")
+}
+if (!file.exists(train_file)) {
+  download.file(train_url, destfile=train_file)
+}
+if (!file.exists(test_file)) {
+  download.file(test_url, destfile=test_file)
+}
+```  
+### Read
+```{r, cache = T}
+train_raw <- read.csv(train_file)
+test_raw <- read.csv(test_file)
+dim(train_raw)
+dim(test_raw)
+```
+The training data set contains 19622 observations and 160 variables, while the testing data set contains 20 observations and 160 variables. The "classe" variable in the training set is the outcome to predict. 
+
+### Clean
+```{r, cache = T}
+sum(complete.cases(train_raw))
+```
+
+Removing columns that contain NA values
+```{r, cache = T}
+train_raw <- train_raw[, colSums(is.na(train_raw)) == 0] 
+test_raw <- test_raw[, colSums(is.na(test_raw)) == 0] 
+```  
+
+Remove unwanted data
+```{r, cache = T}
+classe <- train_raw$classe
+train_remove <- grepl("^X|timestamp|window", names(train_raw))
+train_raw <- train_raw[, !train_remove]
+train_final <- train_raw[, sapply(train_raw, is.numeric)]
+train_final$classe <- classe
+
+test_remove <- grepl("^X|timestamp|window", names(test_raw))
+test_raw <- test_raw[, !test_remove]
+test_final <- test_raw[, sapply(test_raw, is.numeric)]
+```
+Now, the final training data set contains 19622 observations and 53 variables, while the testing data set contains 20 observations and 53 variables. The "classe" variable is still in the final training set.
+
+### Slicing
+Split the final training set into a pure training data set (70%) and a validation data set (30%).  
+```{r, cache = T}
+set.seed(22519) # For reproducibile purpose
+in_train <- createDataPartition(train_final$classe, p=0.70, list=F)
+train_data <- train_final[in_train, ]
+test_data <- train_final[-in_train, ]
+```
+
+At this stage we are happy to finish preparing data and start with data modeling and predictions.
+
+## Data Modeling
+Fit a predictive model, for activity recognition using **Random Forest** algorithm because it automatically selects important variables and is robust to correlated covariates & outliers in general. Let's use **5-fold cross validation** when applying the algorithm.  
+```{r, cache = T}
+control_rf <- trainControl(method="cv", 5)
+model_rf <- train(classe ~ ., data=train_data, method="rf", trControl=control_rf, ntree=250)
+model_rf
+```
+Then, let's estimate the performance of the model on the validation data set.  
+```{r, cache = T}
+predict_rf <- predict(model_rf, test_data)
+confusionMatrix(test_data$classe, predict_rf)
+```
+```{r, cache = T}
+accuracy <- postResample(predict_rf, test_data$classe)
+accuracy
+oose <- 1 - as.numeric(confusionMatrix(test_data$classe, predict_rf)$overall[1])
+oose
+```
+So, the estimated accuracy of the model is 99.29% and the estimated out-of-sample error is 0.71%.
+
+## Predicting for Test Data Set
+Apply the model to the original testing data set downloaded from the data source after removing the `problem_id` column first.  
+```{r, cache = T}
+result <- predict(model_rf, test_final[, -length(names(test_final))])
+result
+```  
+
+## Appendix: Figures
+1. Correlation Matrix Visualization  
+```{r, cache = T, fig.height=8, fig.width=8}
+corrPlot <- cor(train_data[, -length(names(train_data))])
+corrplot(corrPlot, method="color")
+```
+2. Decision Tree Visualization
+```{r, cache = T}
+tree_model <- rpart(classe ~ ., data=train_data, method="class")
+prp(tree_model)
+```
